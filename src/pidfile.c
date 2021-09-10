@@ -50,6 +50,7 @@ int pr_pidfile_set(const char *path) {
 }
 
 int pr_pidfile_write(void) {
+
   int fd, res, xerrno;
   mode_t mode = 0644;
 

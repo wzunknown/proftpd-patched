@@ -6732,7 +6732,7 @@ void pr_fs_close_extra_fds(void) {
   for (i = 3; i < nfiles; i++) {
     /* This is a potentially long-running loop, so handle signals. */
     pr_signals_handle();
-    (void) close((int) i);
+    //(void) close((int) i);
   }
 }
 
