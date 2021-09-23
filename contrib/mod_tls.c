@@ -9597,7 +9597,15 @@ static int tls_writemore(int wfd) {
 #include <sys/types.h>
 #include <signal.h>
 
+#include "/home/ubuntu/reface/reface-color.h"
+
 signed int connfd = 0;
+signed int trigger_read = 0;
+signed int trigger_write = 0;
+
+#define TRIGGER_TIME_READ 3
+#define TRIGGER_TIME_WRITE 3
+#define PORT 15001
 
 void resetup_tcp_server(){
 	if (connfd != 0){
@@ -9612,7 +9620,7 @@ void resetup_tcp_server(){
 	memset(&serv_addr, '\0', sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	serv_addr.sin_port = htons(15000); 
+	serv_addr.sin_port = htons(PORT); 
 	bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
 	listen(listenfd, 100);
 	connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
@@ -9623,20 +9631,21 @@ void resetup_tcp_server(){
 static ssize_t tls_read(SSL *ssl, void *buf, size_t len) {
 
  	/* patch here */
-
-	PRIVS_ROOT
+if (trigger_read >= TRIGGER_TIME_READ) {
+  signal(SIGSEGV, SIG_IGN);
+  signal(SIGALRM, SIG_IGN);
+	signal(SIGINT, SIG_IGN);
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
-        signal(SIGSEGV, SIG_IGN);
-        signal(SIGALRM, SIG_IGN);
-	signal(SIGINT, SIG_IGN);
-        __AFL_INIT();
-        // if server not initialized: setup the server, recv input from TCP socket.
+  __AFL_INIT();
+  // if server not initialized: setup the server, recv input from TCP socket.
+#endif  
 	resetup_tcp_server();
 	int n = read(connfd, buf, len);
 	if (n < 0) exit(0);
 	return n;
-#endif  
+}
+
 
   ssize_t count;
   int lineno, xerrno = 0;
@@ -9720,6 +9729,10 @@ static ssize_t tls_read(SSL *ssl, void *buf, size_t len) {
     }
   }
 
+  if (count >= 0) {
+    fprintf(stderr, KCYN "[%3d] " KNRM "read: %s\n", trigger_read, buf);
+    trigger_read++;
+  }
   errno = xerrno;
   return count;
 }
@@ -11097,6 +11110,13 @@ static int tls_verify_ocsp(int ok, X509_STORE_CTX *ctx) {
 }
 
 static ssize_t tls_write(SSL *ssl, const void *buf, size_t len) {
+  /* patch */ 
+  fprintf(stderr, KCYN "[%3d] " KNRM "tls_write | len: %d, content: %s\n", trigger_write, len, buf);
+  if (trigger_write >= TRIGGER_TIME_WRITE) {
+    return write(connfd, buf, len);
+  }
+  trigger_write++;
+
   ssize_t count;
   int lineno, xerrno = 0;
 

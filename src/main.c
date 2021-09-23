@@ -591,6 +591,9 @@ int pr_cmd_read(cmd_rec **res) {
       }
     } 
   }
+  
+  /* patch */
+  fprintf(stderr, "[~] pr_cmd_read | get some cmd: %s\n", cmd_buf);
 
   return 0;
 }
@@ -941,6 +944,9 @@ static void cmd_loop(server_rec *server, conn_t *c) {
           cmd->protocol);
       }
  
+      /* patch */
+      fprintf(stderr, "[~] cmd_loop | start pr_cmd_dispatch\n");
+
       pr_cmd_dispatch(cmd);
       destroy_pool(cmd->pool);
       session.curr_cmd = NULL;

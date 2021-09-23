@@ -1,3 +1,6 @@
+fuzzing*
+
+
 .deps/
 .github/
 autom4te.cache
