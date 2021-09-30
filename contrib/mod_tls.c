@@ -9598,51 +9598,154 @@ static int tls_writemore(int wfd) {
 #include <signal.h>
 
 #include "/home/ubuntu/reface/reface-color.h"
-
-signed int connfd = 0;
-signed int trigger_read = 0;
-signed int trigger_write = 0;
+#include <time.h>
 
 #define TRIGGER_TIME_READ 3
 #define TRIGGER_TIME_WRITE 3
 #define PORT 15001
+// #define TCPSERVER
+#define UDPSERVER
 
+signed int socketfd = -1;
+
+#ifdef TCPSERVER
+signed int connfd = -1;
+#elif defined UDPSERVER
+struct sockaddr_in client_addr;
+int client_len = sizeof(struct sockaddr_in); 
+#endif
+signed int trigger_read = 0;
+signed int trigger_write = 0;
+
+#define ERRORFILE "error.log"
+
+
+
+void output_error(char* msg) {
+  FILE* fp = fopen(ERRORFILE, "a+");
+  fprintf(fp, "%ld %d %s\n", time(NULL), (int) getpid(), msg);
+  fclose(fp);
+  return;
+}
+void output(char* filename, char* msg) {
+  FILE* fp = fopen(filename, "a+");
+  fprintf(fp, "%ld %d %s\n", time(NULL), (int) getpid(), msg);
+  fclose(fp);
+  return;
+}
+
+#ifdef TCPSERVER
 void resetup_tcp_server(){
-	if (connfd != 0){
-		return;
-	}
+	if (connfd != -1) {
+    return;
+  }
 	
-	int listenfd = 0;
 	struct sockaddr_in serv_addr;
-	listenfd = socket(AF_INET, SOCK_STREAM, 0);
-	int nOptval;
-	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&nOptval , sizeof(int));
+	socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (socketfd == -1) {
+    output_error("socket failed");
+    exit(0);
+  }
+	int nOptval = 1;
+	if ( (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&nOptval , sizeof(int))) != 0 ) {
+    output_error("setsocket failed");
+    exit(0);
+  }
+	// if ( (setsockopt(socketfd, SOL_SOCKET, SO_REUSEPORT, (const void *)&nOptval , sizeof(int))) != 0 ) {
+  //   output_error("setsocket failed");
+  //   exit(0);
+  // }
 	memset(&serv_addr, '\0', sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	serv_addr.sin_port = htons(PORT); 
-	bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
-	listen(listenfd, 100);
-	connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
-        return;
+	if ( (bind(socketfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr))) != 0 ) {
+    output_error("bind failed");
+    exit(0);
+  }
+	if ( (listen(socketfd, 5)) != 0) {
+    output_error("listen failed");
+    exit(0);
+  }
+	connfd = accept(socketfd, (struct sockaddr*)NULL, NULL);
+  if (connfd == -1) {
+    output_error("accept failed");
+    exit(0);
+  }
+  output_error("connected");
+  return;
 }
+#elif defined UDPSERVER
+void resetup_udp_server() {
+	if (socketfd != -1) {
+    return;
+  }
+	
+	struct sockaddr_in serv_addr;
+	socketfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (socketfd == -1) {
+    output_error("socket failed");
+    exit(0);
+  }
+  struct timeval tv;
+  tv.tv_sec = 0;
+  tv.tv_usec = 50000;
+	if ( (setsockopt(socketfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) != 0 ) {
+    output_error("setsocket failed");
+    exit(0);
+  }
+  int nOptval = 1;
+	if ( (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&nOptval , sizeof(int))) != 0 ) {
+    output_error("setsocket failed");
+    exit(0);
+  }
+	memset(&serv_addr, '\0', sizeof(serv_addr));
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	serv_addr.sin_port = htons(PORT);
+	if ( (bind(socketfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr))) != 0 ) {
+    output_error("bind failed");
+    exit(0);
+  }
+
+  output_error("connected");
+  return;  
+}
+#endif
+
+// void clearfd() {
+//   close(socketfd);
+//   socketfd = -1;
+//   close(connfd);
+//   connfd = -1;
+// }
 
 
 static ssize_t tls_read(SSL *ssl, void *buf, size_t len) {
 
  	/* patch here */
 if (trigger_read >= TRIGGER_TIME_READ) {
-  signal(SIGSEGV, SIG_IGN);
+  // signal(SIGSEGV, SIG_IGN);
   signal(SIGALRM, SIG_IGN);
-	signal(SIGINT, SIG_IGN);
+	// signal(SIGINT, SIG_IGN);
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
   __AFL_INIT();
   // if server not initialized: setup the server, recv input from TCP socket.
-#endif  
+  int n = 0;
+#ifdef TCPSERVER
 	resetup_tcp_server();
-	int n = read(connfd, buf, len);
+	n = read(connfd, buf, len);
+#elif defined UDPSERVER
+  resetup_udp_server();
+  n = recvfrom(socketfd, buf, len, 0, (struct sockaddr *)&client_addr, &client_len);
+  // char s[100];
+  // sprintf(s, "read n = %d", n);
+  // output_error(s);
+  // output_error(buf);
+#endif
 	if (n < 0) exit(0);
+#endif  
 	return n;
 }
 
@@ -9730,7 +9833,7 @@ if (trigger_read >= TRIGGER_TIME_READ) {
   }
 
   if (count >= 0) {
-    fprintf(stderr, KCYN "[%3d] " KNRM "read: %s\n", trigger_read, buf);
+    fprintf(stderr, KCYN "[%3d] " KNRM "tls_read: %s\n", trigger_read, buf);
     trigger_read++;
   }
   errno = xerrno;
@@ -11113,7 +11216,22 @@ static ssize_t tls_write(SSL *ssl, const void *buf, size_t len) {
   /* patch */ 
   fprintf(stderr, KCYN "[%3d] " KNRM "tls_write | len: %d, content: %s\n", trigger_write, len, buf);
   if (trigger_write >= TRIGGER_TIME_WRITE) {
-    return write(connfd, buf, len);
+    int res;
+    #ifdef TCPSERVER
+    res = write(connfd, buf, len);
+    #elif defined UDPSERVER
+    // client_len = sizeof(struct sockaddr_in);
+    res = sendto(socketfd, buf, len, 0, (struct sockaddr*)&client_addr, client_len);
+    // char s[100];
+    // if (res < 0) {
+    //   sprintf(s, "write %s", strerror(errno));
+    // } else {
+    //   sprintf(s, "write n = %d", res);
+    // }
+    // output_error(s);
+    // output_error(buf);
+    #endif
+    return res;
   }
   trigger_write++;
 
